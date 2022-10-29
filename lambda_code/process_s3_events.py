@@ -1,3 +1,7 @@
+"""
+    This lambda function will be called by S3 bucket on file creation event.
+    It will extract datapoints from the resume and will put into dynamodb table.
+"""
 import os
 import boto3
 import datetime
@@ -23,7 +27,7 @@ class Item:
         self.id = str(uuid.uuid4())
         self.fullname = name
         self.email = email
-        self.skills = skills
+        self.skills = list(map(lambda s: s.lower(), skills))  # store in lower case
         self.resume_key = resume_key
         self.exp = exp
         self.cr_timestamp = str(datetime.datetime.now())
@@ -58,6 +62,7 @@ def get_resume_data_points(data):
     debug = bool(int(os.environ['DEBUG']))
 
     if debug:
+        # Debug will not make any api calls
         return get_test_data_points()
 
     headers = {'Content-Type': 'application/octet-stream', 'apikey': api_key}

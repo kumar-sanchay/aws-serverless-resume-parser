@@ -1,3 +1,6 @@
+"""
+    upload_to_s3 will be used as lambda backend for uploading resume through api gateway.
+"""
 import os
 import base64
 import boto3

@@ -1,6 +1,32 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: "resume-parser-app\n"
+Parameters:
+  APIGatewayStageName:
+    Description: Specify stage name for api gateway
+    Type: String
+    AllowedValues:
+    - prod
+    - dev
+    - test
+    Default: dev
+  ResumeStoreDBName:
+    Description: Specify dynamo db name
+    Type: String
+    Default: StoreResumeData
+  Debug:
+    Description: Debug value
+    Type: String
+    AllowedValues:
+    - 0
+    - 1
+    Default: 1
+  ApiUrl:
+    Description: Specify api for resume parser
+    Type: String
+  ApiKey:
+    Description: Specify apikey for resume parser
+    Type: String
 Resources:
   UploadToS3ExecutionRole:
     Type: AWS::IAM::Role
@@ -13,6 +39,28 @@ Resources:
           Principal:
             Service: lambda.amazonaws.com
       RoleName: UploadToS3ExecutionRole
+  ProcessResumeLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      RoleName: ProcessResumeLambdaExecutionRole
+  GetResumeLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      RoleName: GetResumeLambdaExecutionRole
   UploadToS3ExecutionPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -25,16 +73,15 @@ Resources:
         - Effect: Allow
           Action:
           - s3:PutObject
-          Resource:
-            Fn::GetAtt:
-            - StoreBucket
-            - Arn
+          Resource: '*'
   UploadLambdaLogs:
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: LambdaPutLogsPolicy
       Roles:
       - Ref: UploadToS3ExecutionRole
+      - Ref: ProcessResumeLambdaExecutionRole
+      - Ref: GetResumeLambdaExecutionRole
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -42,6 +89,77 @@ Resources:
           Action:
           - logs:*
           Resource: '*'
+  GetResumeS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GetResumeS3Policy
+      Roles:
+      - Ref: ProcessResumeLambdaExecutionRole
+      - Ref: GetResumeLambdaExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          Resource: '*'
+  PutResumeDynamoDBPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: PutResumeDynamoDBPolicy
+      Roles:
+      - Ref: ProcessResumeLambdaExecutionRole
+      - Ref: GetResumeLambdaExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          - dynamodb:GetItem
+          - dynamodb:Scan
+          Resource: '*'
+  ResumeParserLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: resume-parser-layer
+      Description: All required packages for resume parser project
+      ContentUri: s3://resume-parser-sam-artifact/c26ba7ed0b478f7f72a42805affde349
+  ProcessResumeLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: process-resume-events
+      CodeUri: s3://resume-parser-sam-artifact/c3eba22390b3d1633ca4fbfd82c6ac8b
+      Handler: process_s3_events.lambda_handler
+      Runtime: python3.8
+      Role:
+        Fn::GetAtt:
+        - ProcessResumeLambdaExecutionRole
+        - Arn
+      Timeout: 100
+      Environment:
+        Variables:
+          DEBUG:
+            Ref: Debug
+          API_URL:
+            Ref: ApiUrl
+          API_KEY:
+            Ref: ApiKey
+          STORE_TABLE_NAME:
+            Ref: ResumeStoreDBName
+      Layers:
+      - Ref: ResumeParserLayer
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: ProcessResumeLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - StoreBucket
+        - Arn
   StoreBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -53,6 +171,7 @@ Resources:
         - Effect: Allow
           Action:
           - s3:PutObject
+          - s3:GetObject
           Resource:
             Fn::Join:
             - /
@@ -74,6 +193,13 @@ Resources:
         ServerSideEncryptionConfiguration:
         - ServerSideEncryptionByDefault:
             SSEAlgorithm: AES256
+      NotificationConfiguration:
+        LambdaConfigurations:
+        - Event: s3:ObjectCreated:*
+          Function:
+            Fn::GetAtt:
+            - ProcessResumeLambdaFunction
+            - Arn
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -82,9 +208,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: upload-resume-to-s3
-      CodeUri: s3://resume-parser-sam-artifact/d669debae017c217ae6ce9733be9d376
+      CodeUri: s3://resume-parser-sam-artifact/c3eba22390b3d1633ca4fbfd82c6ac8b
       Handler: upload_to_s3.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.8
       Events:
         UploadToS3:
           Type: Api
@@ -92,7 +218,7 @@ Resources:
             Path: /upload-resume
             Method: POST
             RestApiId:
-              Ref: UploadToS3API
+              Ref: ResumeAPI
       Role:
         Fn::GetAtt:
         - UploadToS3ExecutionRole
@@ -101,10 +227,58 @@ Resources:
         Variables:
           UPLOAD_S3_NAME:
             Ref: StoreBucket
-  UploadToS3API:
+      Layers:
+      - Ref: ResumeParserLayer
+  ResumeAPI:
     Type: AWS::Serverless::Api
     Properties:
       Name: resume-parser-api
-      StageName: dev
+      StageName:
+        Ref: APIGatewayStageName
       BinaryMediaTypes:
       - application/pdf
+  ResumeDynamoDB:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Ref: ResumeStoreDBName
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      - AttributeName: cr_timestamp
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      - AttributeName: cr_timestamp
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+  GetResumeLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: get-resumes
+      CodeUri: s3://resume-parser-sam-artifact/c3eba22390b3d1633ca4fbfd82c6ac8b
+      Handler: get_resumes.lambda_handler
+      Runtime: python3.8
+      Role:
+        Fn::GetAtt:
+        - GetResumeLambdaExecutionRole
+        - Arn
+      Events:
+        GetResume:
+          Type: Api
+          Properties:
+            Method: GET
+            Path: /get-resume
+            RestApiId:
+              Ref: ResumeAPI
+      Environment:
+        Variables:
+          UPLOAD_S3_NAME:
+            Ref: StoreBucket
+          STORE_TABLE_NAME:
+            Ref: ResumeStoreDBName
+      Layers:
+      - Ref: ResumeParserLayer

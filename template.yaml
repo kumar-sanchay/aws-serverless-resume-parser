@@ -3,6 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   resume-parser-app
 
+# Parameters require while creating resources
 Parameters:
   APIGatewayStageName:
     Description: Specify stage name for api gateway
@@ -37,6 +38,7 @@ Parameters:
 
 Resources:
 
+  # Execution role will be used by lambda function for uploading files on s3
   UploadToS3ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -49,6 +51,7 @@ Resources:
               Service: lambda.amazonaws.com
       RoleName: UploadToS3ExecutionRole
 
+  # Execution role will be used by lambda function for process resume api
   ProcessResumeLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -61,6 +64,7 @@ Resources:
               Service: lambda.amazonaws.com
       RoleName: ProcessResumeLambdaExecutionRole
 
+  # Execution role will be used by lambda function for get resume api
   GetResumeLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -73,6 +77,7 @@ Resources:
               Service: lambda.amazonaws.com
       RoleName: GetResumeLambdaExecutionRole
 
+  # Policy to upload file on s3
   UploadToS3ExecutionPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -87,6 +92,7 @@ Resources:
               - s3:PutObject
             Resource: "*"
 
+  # Policy used by lambda functions to upload logs in cloudwatch
   UploadLambdaLogs:
     Type: AWS::IAM::Policy
     Properties:
@@ -117,7 +123,8 @@ Resources:
             Action:
               - s3:GetObject
             Resource: "*"
-  
+
+  # Policy will be used by process resume api lambda 
   PutResumeDynamoDBPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -135,6 +142,7 @@ Resources:
               - dynamodb:Scan
             Resource: "*"
 
+  # Common layer for all lambda functions with required python packages
   ResumeParserLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -160,6 +168,7 @@ Resources:
       Layers:
         - !Ref ResumeParserLayer
 
+  # Permission needed for s3 for invoking lambda function
   S3InvokeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -199,6 +208,7 @@ Resources:
               SSEAlgorithm: 'AES256'
       NotificationConfiguration:
         LambdaConfigurations:
+          # Invoke lambda function when object is created
           - Event: 's3:ObjectCreated:*'
             Function: !GetAtt ProcessResumeLambdaFunction.Arn
       PublicAccessBlockConfiguration:
@@ -235,6 +245,7 @@ Resources:
       BinaryMediaTypes:
         - 'application/pdf'
 
+  # Dynamo db to store data points extracted from resume
   ResumeDynamoDB:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -253,6 +264,7 @@ Resources:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
 
+  # Api for getting resume data stored in dynamo db and s3
   GetResumeLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
