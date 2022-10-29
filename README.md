@@ -10,6 +10,7 @@ AWS serverless services used in this project:
 - AWS s3
 
 Roles and policies attached to this services has only necessary permission.
+Lambda functions is return in python programming language.
 Layers consists of neccsary python packages required by lambda functions.
 
 This project mainly consists of 3 lambda functions
@@ -18,7 +19,7 @@ This project mainly consists of 3 lambda functions
    This will be used with an api in api gateway to upload resume files on S3.
 
 2) Process Resume
-   Process resume lambda function will be invoked by S3 on object creation event.
+   This lambda function will be invoked by S3 on object creation event.
    This lambda function will extract data poits from resume file and store it in dynamo db.
 
 3) Get Resume
