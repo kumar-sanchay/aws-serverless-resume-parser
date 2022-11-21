@@ -1,73 +1,57 @@
+import os
 import json
-
-import pytest
-
-from hello_world import app
-
-
-@pytest.fixture()
-def apigw_event():
-    """ Generates API GW Event"""
-
-    return {
-        "body": '{ "test": "body"}',
-        "resource": "/{proxy+}",
-        "requestContext": {
-            "resourceId": "123456",
-            "apiId": "1234567890",
-            "resourcePath": "/{proxy+}",
-            "httpMethod": "POST",
-            "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
-            "accountId": "123456789012",
-            "identity": {
-                "apiKey": "",
-                "userArn": "",
-                "cognitoAuthenticationType": "",
-                "caller": "",
-                "userAgent": "Custom User Agent String",
-                "user": "",
-                "cognitoIdentityPoolId": "",
-                "cognitoIdentityId": "",
-                "cognitoAuthenticationProvider": "",
-                "sourceIp": "127.0.0.1",
-                "accountId": "",
-            },
-            "stage": "prod",
-        },
-        "queryStringParameters": {"foo": "bar"},
-        "headers": {
-            "Via": "1.1 08f323deadbeefa7af34d5feb414ce27.cloudfront.net (CloudFront)",
-            "Accept-Language": "en-US,en;q=0.8",
-            "CloudFront-Is-Desktop-Viewer": "true",
-            "CloudFront-Is-SmartTV-Viewer": "false",
-            "CloudFront-Is-Mobile-Viewer": "false",
-            "X-Forwarded-For": "127.0.0.1, 127.0.0.2",
-            "CloudFront-Viewer-Country": "US",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Upgrade-Insecure-Requests": "1",
-            "X-Forwarded-Port": "443",
-            "Host": "1234567890.execute-api.us-east-1.amazonaws.com",
-            "X-Forwarded-Proto": "https",
-            "X-Amz-Cf-Id": "aaaaaaaaaae3VYQb9jd-nvCd-de396Uhbp027Y2JvkCPNLmGJHqlaA==",
-            "CloudFront-Is-Tablet-Viewer": "false",
-            "Cache-Control": "max-age=0",
-            "User-Agent": "Custom User Agent String",
-            "CloudFront-Forwarded-Proto": "https",
-            "Accept-Encoding": "gzip, deflate, sdch",
-        },
-        "pathParameters": {"proxy": "/examplepath"},
-        "httpMethod": "POST",
-        "stageVariables": {"baz": "qux"},
-        "path": "/examplepath",
-    }
+import uuid
+import requests
+import unittest
+from unittest import mock
+from lambda_code.upload_to_s3 import s3 as upload_s3, lambda_handler as upload_lambda_handler
+from lambda_code.process_s3_events import s3 as process_s3, lambda_handler as process_lambda_handler
 
 
-def test_lambda_handler(apigw_event, mocker):
+class TestUploadToS3Lambda(unittest.TestCase):
 
-    ret = app.lambda_handler(apigw_event, "")
-    data = json.loads(ret["body"])
+    def setUp(self):
 
-    assert ret["statusCode"] == 200
-    assert "message" in ret["body"]
-    assert data["message"] == "hello world"
-    # assert "location" in data.dict_keys()
+        self.event = {
+            'body': b'some fake file body'
+        }
+
+    @mock.patch.object(upload_s3, 'put_object', return_value=True)
+    @mock.patch.dict(os.environ, {'UPLOAD_S3_NAME': 'TestS3'}, clear=True)
+    def test_handler(self, client_stub):
+        
+        response = upload_lambda_handler(self.event, {})
+        self.assertEqual(response['statusCode'], requests.codes.ALL_OK)
+        self.assertEqual(json.loads(response['body'])['message'], 'File Uploaded')
+
+
+class TestPracessS3EventHandler(unittest.TestCase):
+
+    def setUp(self):
+
+        # S3 event required dict values
+        self.event = {
+            'Records': [
+                {
+                    's3': {
+                        'bucket': {
+                            'name': 'some-bucket'
+                        },
+                        'object': {
+                            'key': str(uuid.uuid4())
+                        }
+                    }
+                },
+            ]
+        }
+
+    @mock.patch.object(process_s3, 'Bucket')
+    @mock.patch('lambda_code.process_s3_events.put_data_dynamodb')
+    @mock.patch('builtins.open')
+    @mock.patch.dict(os.environ, {'API_KEY': 'K', 'API_URL': 'u', 'DEBUG': '1'}, clear=True)
+    def test_handler(self, s3_stub, dynamo_stub, open_stub):
+
+        process_lambda_handler(self.event, {})
+
+        dynamo_stub.assert_called_once()
+        s3_stub.assert_called_once()

@@ -1,5 +1,6 @@
 import os
 from unittest import TestCase
+from urllib import response
 
 import boto3
 import requests
@@ -10,11 +11,10 @@ Make sure env variable AWS_SAM_STACK_NAME exists with the name of the stack we a
 
 
 class TestApiGateway(TestCase):
-    api_endpoint: str
 
     @classmethod
     def get_stack_name(cls) -> str:
-        stack_name = os.environ.get("AWS_SAM_STACK_NAME")
+        stack_name = os.environ['AWS_SAM_STACK_NAME']
         if not stack_name:
             raise Exception(
                 "Cannot find env var AWS_SAM_STACK_NAME. \n"
@@ -26,30 +26,22 @@ class TestApiGateway(TestCase):
     def setUp(self) -> None:
         """
         Based on the provided env variable AWS_SAM_STACK_NAME,
-        here we use cloudformation API to find out what the HelloWorldApi URL is
+        here we use cloudformation API to find out what resources it holds
         """
         stack_name = TestApiGateway.get_stack_name()
 
         client = boto3.client("cloudformation")
 
         try:
-            response = client.describe_stacks(StackName=stack_name)
+            response = client.list_stack_resources(StackName=stack_name)
         except Exception as e:
-            raise Exception(
-                f"Cannot find stack {stack_name}. \n" f'Please make sure stack with the name "{stack_name}" exists.'
-            ) from e
+            raise Exception(f'Cannot find stackname {stack_name} - {e}')
 
-        stacks = response["Stacks"]
+        self.stack_resources = response['StackResourceSummaries']
 
-        stack_outputs = stacks[0]["Outputs"]
-        api_outputs = [output for output in stack_outputs if output["OutputKey"] == "HelloWorldApi"]
-        self.assertTrue(api_outputs, f"Cannot find output HelloWorldApi in stack {stack_name}")
-
-        self.api_endpoint = api_outputs[0]["OutputValue"]
-
-    def test_api_gateway(self):
+    def test_status_resources(self):
         """
-        Call the API Gateway endpoint and check the response
+            Test all resources in cloudformation stack has valid status
         """
-        response = requests.get(self.api_endpoint)
-        self.assertDictEqual(response.json(), {"message": "hello world"})
+        VALID_STATUS = ['CREATE_COMPLETE', 'UPDATE_COMPLETE']
+        self.assertEqual(all([True if res['ResourceStatus'] in VALID_STATUS else False for res in self.stack_resources]), True)

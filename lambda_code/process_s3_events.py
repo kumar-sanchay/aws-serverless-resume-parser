@@ -42,6 +42,7 @@ def lambda_handler(event, context):
         s3_bucket_name = event['Records'][0]['s3']['bucket']['name']
         key = str(urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'], encoding='utf-8'))
 
+        # download s3 file in tmp dir for further processing
         with tempfile.TemporaryFile(dir='/tmp') as temp_resume:
             s3.Bucket(s3_bucket_name).download_file(key, os.path.join('/tmp', str(temp_resume.name)))
             with open(os.path.join('/tmp', str(temp_resume.name)), 'rb') as resume:
@@ -76,6 +77,9 @@ def get_resume_data_points(data):
 
 
 def put_data_dynamodb(item):
+    """
+        Insert extracted resume data points in dynamo db.
+    """
     table_name = os.environ['STORE_TABLE_NAME']
     db_table = dynamodb.Table(table_name)
     db_table.put_item(
